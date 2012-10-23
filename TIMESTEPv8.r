@@ -10,6 +10,10 @@
 # g.	Results calculated
 # h.	State vector and results vector outputed
 
+# NOTE: The difference between v6 and v5 is that the former does not have a local RateMat inside the timestep function, instead modifying the global RateMatStat.
+# NOTE: The difference between v7 and v6 is that the former does not have a loop over z inside the timestep function, instead using explicit linear combinations.
+# NOTE: The difference between v8 and v7 is that the former does not have an explicitly constructed temporary copy of the rate matrix with a zeroed-out diagonal.
+
 ######## EXTRA INDICES ##########
 	i1 <- j1 <- rep(0,0); for(j in 0:6) { for (i in Vtemp1[1:10+j*10]+2) { i1[i]<-i; j1[i]<-j } }
 	i1 <- as.numeric(na.omit(i1));  j1 <- as.numeric(na.omit(j1))+1
@@ -97,86 +101,97 @@
 	Vnext 		<- Vcurrent		# Initializes new vector
 	Vnext[505] 		<- 0			# Clears out deaths
 	Vnext[1]		<- Vnext[1]	+ NewEntt[t]*1000000	  # Adds new entrants to NU0Su based on birth rate
+	
+  ### Compute the relative weights of each diacgnostic
+  coeff1 = (1 - PhaseIn1[t]) * (1 - PhaseIn2[t])
+  coeff2 =  PhaseIn1[t] * (1 - PhaseIn2[t])
+  coeff3 = 0
+  if (DIAG == 1) {
+    coeff1 = coeff1 + PhaseIn2[t]
+  }
+  else if (DIAG == 2) {
+    coeff2 = coeff2 + PhaseIn2[t]
+  }
+  else { # DIAG = 3
+    coeff3 = coeff3 + PhaseIn2[t]
+  }
 
 ### TREATMENT TRANSITIONS, BY ALGORITHM  
-	for (z in 1:Nalg) {  # this needs to be for all algorithms z
-	RateMatStatz	<- RateMatStat
-	TxMat			<- get(paste("TxMatAlg",z,sep=""))
 
 ### B5. POPULATE MORTALITY RATES 
-	RateMatStatz[Vtemp6,505] <- RateMatStatz[Vtemp6,505] + 2/TxMat[1,Vtemp6]*rep(c(muIn,muIn,muIp,muIp),70)*TunTxMort	# Treatment TB mortality
-  	RateMatStatz[Vtemp9[101:120],505]	<- muTBH			# TB-HIV mortality for CD4 350
+	RateMatStat[Vtemp6,505] <- RateMatStat[Vtemp6,505] + (coeff1/TxMatAlg1[1,Vtemp6] + coeff2/TxMatAlg2[1,Vtemp6] + coeff3/TxMatAlg3[1,Vtemp6]) *2*rep(c(muIn,muIn,muIp,muIp),70)*TunTxMort	# Treatment TB mortality
+	RateMatStat[Vtemp9[101:120],505]	<- muTBH			# TB-HIV mortality for CD4 350
 
 # Vector of current contact rates...
-	VTrStatz[Vtemp6]		<- (1-TxMat[2,Vtemp6]*TxEft[t])*rep(rep(c(TrIn,TrIn,1,1),5)*rep(RelFit,each=4),14)
+	VTrStatz[Vtemp6] = (1 - (coeff1 * TxMatAlg1[2,Vtemp6] + coeff2 * TxMatAlg2[2,Vtemp6] + coeff3 * TxMatAlg3[2,Vtemp6]) * TxEft[t]) * rep(rep(c(TrIn, TrIn, 1, 1), 5) * rep(RelFit, each=4), 14)
 											# Contact rates for individuals on treatment
-	assign(paste('VTrStat',z,sep=""),VTrStatz)
 
 ### B5. TREATMENT OUTCOMES (Stay in HIV / Resistance subdivisions) 
-	RateMatStatz[a9]  <-  RateMatStatz[a9] + 12/TxMat[a10]*TxMat[a11]*TxEft[t]   # Cures back to Ls state, treatment experienced subdivision
-	RateMatStatz[a12] <-  RateMatStatz[a12] + 12/TxMat[a10]*(1-TxEft[t]*TxMat[a11])*pReTx   # Failures identified and reinitiated on treatment, treatment experienced subdivision
-	RateMatStatz[a13] <-  RateMatStatz[a13] + apply(cbind(0,12/TxMat[a10]*(rep(rep(c(pDeft[t],pDefND),each=35),4)+(1-TxEft[t]*TxMat[a11])*(1-pReTx))-colSums(TxMat[3:8,i2])),1,max)   # Defaulters and failures to active disease
- 	for(k in 1:6)  { RateMatStatz[a14[,c(1,k+1)]] <- RateMatStatz[a14[,c(1,k+1)]]+TxMat[k+2,i3] }  # Defaulters and failures to active disease with Acquired Resistance
-	assign(paste("RateMatStat",z,sep=""),RateMatStatz)	} 
-
-### C2. CREATE RATE MATRIX AND TRANSITION PARAMETER VECTOR
-	RateMat 	<- (RateMatStat1*(1-PhaseIn1[t])+RateMatStat2*PhaseIn1[t])*(1-PhaseIn2[t]) +
-				get(paste("RateMatStat",DIAG,sep=""))*PhaseIn2[t]
-	VTrStat	<- (VTrStat1*(1-PhaseIn1[t])+VTrStat2*PhaseIn1[t])*(1-PhaseIn2[t]) +
-				get(paste("VTrStat",DIAG,sep=""))*PhaseIn2[t]
+	RateMatStat[a9]  <- RateMatStat[a9] + (coeff1*TxMatAlg1[a11]/TxMatAlg1[a10] + coeff2*TxMatAlg2[a11]/TxMatAlg2[a10] + coeff3*TxMatAlg3[a11]/TxMatAlg3[a10])*(12*TxEft[t])   # Cures back to Ls state, treatment experienced subdivision
+	RateMatStat[a12] <-  RateMatStat[a12] + (coeff1*(1-TxEft[t]*TxMatAlg1[a11])/TxMatAlg1[a10] +coeff2*(1-TxEft[t]*TxMatAlg2[a11])/TxMatAlg2[a10] + coeff3*(1-TxEft[t]*TxMatAlg3[a11]) / TxMatAlg3[a10]) * (12*pReTx)   # Failures identified and reinitiated on treatment, treatment experienced subdivision
+  vec1 = apply(cbind(0, 12 / TxMatAlg1[a10] * (rep(rep(c(pDeft[t], pDefND), each=35), 4) + (1 - TxEft[t] * TxMatAlg1[a11]) * (1-pReTx)) - colSums(TxMatAlg1[3:8, i2])), 1, max)
+  vec2 = apply(cbind(0, 12 / TxMatAlg2[a10] * (rep(rep(c(pDeft[t], pDefND), each=35), 4) + (1 - TxEft[t] * TxMatAlg2[a11]) * (1-pReTx)) - colSums(TxMatAlg2[3:8, i2])), 1, max)
+  vec3 = apply(cbind(0, 12 / TxMatAlg3[a10] * (rep(rep(c(pDeft[t], pDefND), each=35), 4) + (1 - TxEft[t] * TxMatAlg3[a11]) * (1-pReTx)) - colSums(TxMatAlg3[3:8, i2])), 1, max)
+	RateMatStat[a13] <-  RateMatStat[a13] + (coeff1 * vec1 + coeff2 * vec2 + coeff3 * vec3)   # Defaulters and failures to active disease
+ 	for(k in 1:6)  {
+   RateMatStat[a14[,c(1,k+1)]] <- RateMatStat[a14[,c(1,k+1)]] + coeff1 * TxMatAlg1[k+2,i3] + coeff2 * TxMatAlg2[k+2,i3] + coeff3 * TxMatAlg3[k+2,i3]
+  }  # Defaulters and failures to active disease with Acquired Resistance
 
 ### C3. UPDATE MORTALITY RATES WITH BACKGROUND MORTALITY
-	RateMat[-505,505]	<- RateMat[-505,505]+mubt[t]
+	RateMatStat[-505,505]	<- RateMatStat[-505,505]+mubt[t]
 
 ### C4. TB INCIDENCE (Can change strain subdivision, stay in HIV / treatment subd.) 
-	VInf 		<- Vnext[1:504]/sum(Vnext[1:504])*VTrStat*CRt[t]			# P(meet carrier)*CR|carrier, homogeneous mixing
+	VInf 		<- Vnext[1:504]/sum(Vnext[1:504])*VTrStatz*CRt[t]			# P(meet carrier)*CR|carrier, homogeneous mixing
 	m <- c(sum(VInf[Vtemp2+0*7]),sum(VInf[Vtemp2+1*7]),sum(VInf[Vtemp2+2*7]),sum(VInf[Vtemp2+3*7]),sum(VInf[Vtemp2+4*7])); m <- rep(m,14)
 
-		RateMat[a15]	<- RateMat[a15]+m*(1-Vpfast[i4])
-		RateMat[a16]	<- RateMat[a16]+m*Vpfast[i4]*(1-VpToIp[i4])
-		RateMat[a17]	<- RateMat[a17]+m*Vpfast[i4]*VpToIp[i4]
+		RateMatStat[a15]	<- RateMatStat[a15]+m*(1-Vpfast[i4])
+		RateMatStat[a16]	<- RateMatStat[a16]+m*Vpfast[i4]*(1-VpToIp[i4])
+		RateMatStat[a17]	<- RateMatStat[a17]+m*Vpfast[i4]*VpToIp[i4]
 
 ### C5. SUPERINFECTION (Can change strain subdivision, stay in HIV / treatment subd.) 
 	VSupInf 		<- VInf*(1-rep(VPartIm,each=72))  # As above, with partial immunity, homogeneous mixing
 	v <- c(sum(VSupInf[Vtemp2+0*7]),sum(VSupInf[Vtemp2+1*7]),sum(VSupInf[Vtemp2+2*7]),sum(VSupInf[Vtemp2+3*7]),sum(VSupInf[Vtemp2+4*7])); v <- v[rep(rep(1:5,each=5),7*2)]
  
-		RateMat[a18]	<- RateMat[a18]+v*(1-Vpfast[i5])
-		RateMat[a19]	<- RateMat[a19]+v*Vpfast[i5]*(1-VpToIp[i5])
-		RateMat[a20]	<- RateMat[a20]+v*Vpfast[i5]*VpToIp[i5]
+		RateMatStat[a18]	<- RateMatStat[a18]+v*(1-Vpfast[i5])
+		RateMatStat[a19]	<- RateMatStat[a19]+v*Vpfast[i5]*(1-VpToIp[i5])
+		RateMatStat[a20]	<- RateMatStat[a20]+v*Vpfast[i5]*VpToIp[i5]
 
 ### C6. DIAGNOSIS AND TREATMENT STRATEGY (Stay in HIV / Resistance / Treatment subdivisions) 
 #  C6a. Specifying diagnosis and treatment as a result of algorithm
-	TxMat		<- (TxMatAlg1*(1-PhaseIn1[t])+TxMatAlg2*PhaseIn1[t])*(1-PhaseIn2[t]) +
-				get(paste("TxMatAlg",DIAG,sep=""))*PhaseIn2[t]
-	TruPosD	<- (TruPosDAlg1*(1-PhaseIn1[t])+TruPosDAlg2*PhaseIn1[t])*(1-PhaseIn2[t]) +
-				get(paste("TruPosDAlg",DIAG,sep=""))*PhaseIn2[t]
-	FalsPosD	<- (FalsPosDAlg1*(1-PhaseIn1[t])+FalsPosDAlg2*PhaseIn1[t])*(1-PhaseIn2[t]) +
-				get(paste("FalsPosDAlg",DIAG,sep=""))*PhaseIn2[t]
-	TruPosDB	<- (TruPosDAlgB1*(1-PhaseIn1[t])+TruPosDAlgB2*PhaseIn1[t])*(1-PhaseIn2[t]) +
-				get(paste("TruPosDAlgB",DIAG,sep=""))*PhaseIn2[t]
-	FalsPosDB	<- (FalsPosDAlgB1*(1-PhaseIn1[t])+FalsPosDAlgB2*PhaseIn1[t])*(1-PhaseIn2[t]) +
-				get(paste("FalsPosDAlgB",DIAG,sep=""))*PhaseIn2[t]
-	VTestCostD	<- (VTestCostD1*(1-PhaseIn1[t])+VTestCostD2*PhaseIn1[t])*(1-PhaseIn2[t]) +
-				get(paste("VTestCostD",DIAG,sep=""))*PhaseIn2[t]
-	VTxCost	<- (VTxCost1*(1-PhaseIn1[t])+VTxCost2*PhaseIn1[t])*(1-PhaseIn2[t]) +
-				get(paste("VTxCost",DIAG,sep=""))*PhaseIn2[t]
-	GetXpt	<- (GetXpt1*(1-PhaseIn1[t])+GetXpt2*PhaseIn1[t])*(1-PhaseIn2[t]) +
-				get(paste("GetXpt",DIAG,sep=""))*PhaseIn2[t]
+	TxMat		  = coeff1 * TxMatAlg1 + coeff2 * TxMatAlg2 + coeff3 * TxMatAlg3
+	TruPosD	  = coeff1 * TruPosDAlg1 + coeff2 * TruPosDAlg2 + coeff3 * TruPosDAlg3
+	FalsPosD	= coeff1 * FalsPosDAlg1 + coeff2 * FalsPosDAlg2 + coeff3 * FalsPosDAlg3
+	TruPosDB	= coeff1 * TruPosDAlgB1 + coeff2 * TruPosDAlgB2 + coeff3 * TruPosDAlgB3
+	FalsPosDB	= coeff1 * FalsPosDAlgB1 + coeff2 * FalsPosDAlgB2 + coeff3 * FalsPosDAlgB3
+	VTestCostD= coeff1 * VTestCostD1 + coeff2 * VTestCostD2 + coeff3 * VTestCostD3
+	VTxCost   = coeff1 * VTxCost1 + coeff2 * VTxCost2 + coeff3 * VTxCost3
+	GetXpt	  = coeff1 * GetXpt1 + coeff2 * GetXpt2 + coeff3 * GetXpt3
 
 #  C6b. Diagnosis and tx initiation
-	RateMat[a21]	<-	DTestt[t]*TruPosD[1:70*2-1]*rTstIn 		# From In to Tn1
-	RateMat[a22]	<-	NDTestt[t]*TruPosND[1:70*2-1]*rTstIn  	# From In to Tn2
-	RateMat[a23]	<-	DTestt[t]*TruPosD[1:70*2]   			# From Ip to Tp1
-	RateMat[a24]	<-	NDTestt[t]*TruPosND[1:70*2]   		# From Ip to Tp2
+	RateMatStat[a21]	<-	DTestt[t]*TruPosD[1:70*2-1]*rTstIn 		# From In to Tn1
+	RateMatStat[a22]	<-	NDTestt[t]*TruPosND[1:70*2-1]*rTstIn  	# From In to Tn2
+	RateMatStat[a23]	<-	DTestt[t]*TruPosD[1:70*2]   			# From Ip to Tp1
+	RateMatStat[a24]	<-	NDTestt[t]*TruPosND[1:70*2]   		# From Ip to Tp2
 
 ### C8. HIV INCIDENCE and ART ENROLLMENT
 	# HIV incidence
-	RateMat[a25] 	<- rHIVt[t]
-	RMtemp <- RateMat; diag(RMtemp) <- 0
-	RMrowsum <- rowSums(RMtemp[c(217:288,361:432),])
-	OnTx <- sum(Vnext[c(145:216,289:360,433:504)])-sum(Vnext[c(145:216,289:360,433:504)]%*%(RateMat[c(145:216,289:360,433:504),-c(145:216,289:360,433:504)]/12))
-	TxNeed200 <- sum(Vnext[361:432])-sum(Vnext[361:432]%*%(RMtemp[361:432,]/12)) 
-	TxNeed350 <- sum(Vnext[217:288])-sum(Vnext[217:288]%*%(RMtemp[217:288,]/12))
+	RateMatStat[a25] 	<- rHIVt[t]
+	
+	firstInds  = 217:288
+	secondInds = 361:432
+	RMDiag  = RateMatStat[a46]
+	RMDiag1 = RMDiag[firstInds]
+	RMtemp1 = RateMatStat[firstInds,  ]
+	RMDiag2 = RMDiag[secondInds]
+  RMtemp2 = RateMatStat[secondInds, ]
+
+	RMrowsum = c(rowSums(RMtemp1), rowSums(RMtemp2)) - c(RMDiag1, RMDiag2)
+	relInds = c(145:216, 289:360, 433:504)
+	OnTx = sum(Vnext[relInds]) - sum(Vnext[relInds] %*% RateMatStat[relInds, -relInds]/12)
+	firstNext = Vnext[firstInds]
+	TxNeed350 = sum(firstNext)  - (sum(firstNext %*% RMtemp1)  - sum(firstNext  * RMDiag1)) / 12
+	secondNext = Vnext[secondInds]
+	TxNeed200 = sum(secondNext) - (sum(secondNext %*% RMtemp2) - sum(secondNext * RMDiag2)) / 12
 
   ##### ART Enrollment up to end 2011 
 	if(t<(12*61+1)) {
@@ -220,11 +235,11 @@
 	VH3toT3B <- max(0,min(1,(xxx[t]-OnTx)/(TxNeed200+TxNeed350+10^-6)))*(12-RMrowsum[73:144])
 	VH2toT2B <- max(0,min(1,(xxx[t]-OnTx)/(TxNeed200+TxNeed350+10^-6)))*(12-RMrowsum[1:72])    }   }
 
-	RateMat[a26] <- VH3toT3A*PriCD4200t[t] + VH3toT3B*(1-PriCD4200t[t])
-	RateMat[a27] <- VH2toT2A*PriCD4200t[t] + VH2toT2B*(1-PriCD4200t[t])  
+	RateMatStat[a26] <- VH3toT3A*PriCD4200t[t] + VH3toT3B*(1-PriCD4200t[t])
+	RateMatStat[a27] <- VH2toT2A*PriCD4200t[t] + VH2toT2B*(1-PriCD4200t[t])  
  
 # C9. CONSTRUCT TRANSITION MATRIX 
-	TransMat	<- RateMat/12  # uses the rates to approximate the probabilities (means that probabilities are independent) 
+	TransMat	<- RateMatStat/12  # uses the rates to approximate the probabilities (means that probabilities are independent) 
 	TransMat[a46] <- 1-(rowSums(TransMat)-TransMat[a46])
 
 # C10. Calculate costs etc
@@ -326,16 +341,16 @@
 
 	Vout["Check1"]	<- min(TransMat[a46])									# Check to see p(stay in state) doesnt become negative
 	Vout["PfailDtx"]<- sum(Vnext[Vtemp6[1:140*2-1]]*(12/TxMat[1,Vtemp6[1:140*2-1]]*(1-TxEft[t]*TxMat[2,Vtemp6[1:140*2-1]])))/
-					(sum(Vnext[Vtemp6[1:140*2-1]]*(12/TxMat[1,Vtemp6[1:140*2-1]]+12/TxMat[1,Vtemp6[1:140*2-1]]*pDeft[t]+RateMat[Vtemp6[1:140*2-1],505]))+10^-6)
+					(sum(Vnext[Vtemp6[1:140*2-1]]*(12/TxMat[1,Vtemp6[1:140*2-1]]+12/TxMat[1,Vtemp6[1:140*2-1]]*pDeft[t]+RateMatStat[Vtemp6[1:140*2-1],505]))+10^-6)
 																# Average failure probability in DOTS programs
 	Vout["PcureDtx"] <- sum(Vnext[Vtemp6[1:140*2-1]]*(12/TxMat[1,Vtemp6[1:140*2-1]]*TxEft[t]*TxMat[2,Vtemp6[1:140*2-1]]))/
-					(sum(Vnext[Vtemp6[1:140*2-1]]*(12/TxMat[1,Vtemp6[1:140*2-1]]+12/TxMat[1,Vtemp6[1:140*2-1]]*pDeft[t]+RateMat[Vtemp6[1:140*2-1],505]))+10^-6)
+					(sum(Vnext[Vtemp6[1:140*2-1]]*(12/TxMat[1,Vtemp6[1:140*2-1]]+12/TxMat[1,Vtemp6[1:140*2-1]]*pDeft[t]+RateMatStat[Vtemp6[1:140*2-1],505]))+10^-6)
 																# Average cure probability in DOTS programs
 	Vout["PdfltDtx"] <- sum(Vnext[Vtemp6[1:140*2-1]]* 12/TxMat[1,Vtemp6[1:140*2-1]]*pDeft[t])/
-					(sum(Vnext[Vtemp6[1:140*2-1]]*(12/TxMat[1,Vtemp6[1:140*2-1]]+ 12/TxMat[1,Vtemp6[1:140*2-1]]*pDeft[t]+RateMat[Vtemp6[1:140*2-1],505]))+10^-6)
+					(sum(Vnext[Vtemp6[1:140*2-1]]*(12/TxMat[1,Vtemp6[1:140*2-1]]+ 12/TxMat[1,Vtemp6[1:140*2-1]]*pDeft[t]+RateMatStat[Vtemp6[1:140*2-1],505]))+10^-6)
 																# Average default probability in DOTS programs
-	Vout["PmortDtx"] <- sum(Vnext[Vtemp6[1:140*2-1]]*RateMat[Vtemp6[1:140*2-1],505])/
-					(sum(Vnext[Vtemp6[1:140*2-1]]*(12/TxMat[1,Vtemp6[1:140*2-1]]+ 12/TxMat[1,Vtemp6[1:140*2-1]]*pDeft[t]+RateMat[Vtemp6[1:140*2-1],505]))+10^-6)
+	Vout["PmortDtx"] <- sum(Vnext[Vtemp6[1:140*2-1]]*RateMatStat[Vtemp6[1:140*2-1],505])/
+					(sum(Vnext[Vtemp6[1:140*2-1]]*(12/TxMat[1,Vtemp6[1:140*2-1]]+ 12/TxMat[1,Vtemp6[1:140*2-1]]*pDeft[t]+RateMatStat[Vtemp6[1:140*2-1],505]))+10^-6)
 																# Average mortality probability in DOTS programs
 	Vout["DurInfSn"]	<- 1/((sum(Vnext[Vtemp1+3]*apply(TransMat[Vtemp1+3,c(Vtemp1+2,Vtemp6,505)],1,sum))+10^-6)/(sum(Vnext[Vtemp1+3])+10^-6))/12
 																# Duration of infectiousness smear negative
@@ -343,7 +358,7 @@
 																# Duration of infectiousness smear positive
  	Vout["DurInfAll"]	<-1/((sum(Vnext[c(Vtemp1+3,Vtemp1+4)]*apply(TransMat[c(Vtemp1+3,Vtemp1+4),c(Vtemp1+2,Vtemp6,505)],1,sum))+10^-6)/(sum(Vnext[c(Vtemp1+3,Vtemp1+4)])+10^-6))/12
 																# Duration of infectiousness, all
-	Vout["EffContRate"] <- sum(Vnext[c(Vtemp1+3,Vtemp1+4)]*VTrStat[c(Vtemp1+3,Vtemp1+4)])/(sum(Vnext[c(Vtemp1+3,Vtemp1+4)])+10^-6)*CRt[t]
+	Vout["EffContRate"] <- sum(Vnext[c(Vtemp1+3,Vtemp1+4)]*VTrStatz[c(Vtemp1+3,Vtemp1+4)])/(sum(Vnext[c(Vtemp1+3,Vtemp1+4)])+10^-6)*CRt[t]
 																# Effective contact rate, untreated active disease
 
 	Vout["ExTbC"]	<- sum(Vnext[Vtemp9[1:20]]*apply(TransMat[Vtemp9[1:20],Vtemp1+2],1,sum))

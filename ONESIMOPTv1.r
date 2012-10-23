@@ -1,24 +1,25 @@
-A=##########   TB XPERT DIAGNOSTIC MODEL 2012  ##########   
-##########            ONESIM FILE            ##########  
+sourceA=##########   TB XPERT DIAGNOSTIC MODEL 2012  ##########
+##########            ONESIM FILE            ##########
 ## NOTES
-# a.	This is another key one. It runs one simulation, summarizes results 
+# a.	This is another key one. It runs one simulation, summarizes results
 # b.	Needs PARAM and TIMESTEP to have been run
 # c.	Takes starting vector, loops over TIMESTEP for 112 years (i.e. till the very end of 2011). At each cycle it inserts results and markov trace vectors into corresponding matrices.
-# d.	For each scenario, continues simulation for 30 years from  2012 to end 2041. 
-# e.	Summarizes results (annualizes full results and markov trace) and calculates key quantities (10/30 year costs etc) 
+# d.	For each scenario, continues simulation for 30 years from  2012 to end 2041.
+# e.	Summarizes results (annualizes full results and markov trace) and calculates key quantities (10/30 year costs etc)
 # f.	Outputs results for all matrices
 
 ################### START OF FUNCTION ######################
 	OneSim <- function(Vparam,Setting)  {
 
 	source("PARAMv5.r")
-	source("TIMESTEPv5.r")
+	source("TIMESTEPOPTv1.r")
 
 ### RUN BASECASE TO END 2012
 	DIAG <- 2
   OutMat1 <- OutMatInit <- OutMat
-	Vcurrent <- V1950/sum(V1950)*InitPop[Setting]*10^6 
-	for(t in 1:(62*12)) { 
+	Vcurrent <- V1950/sum(V1950)*InitPop[Setting]*10^6
+	for(t in 1:(62*12)) {
+    # print(paste("Processing timestep", t))
     Out <- timestep(Vcurrent,t,ArtNdCov11,DIAG,OutMat1)
 		Vcurrent <- Out$Vnext
     OutMatInit[t,] <- Out$Vout
@@ -26,7 +27,7 @@ A=##########   TB XPERT DIAGNOSTIC MODEL 2012  ##########
       ArtNdCov11 <- Out$Vout["ArtNdCov"]
       # break
     }
-  } 
+  }
 	V2012 <- Vcurrent
 
 ### RUN SCENARIO 2012 TO 2042
@@ -34,7 +35,7 @@ A=##########   TB XPERT DIAGNOSTIC MODEL 2012  ##########
 		DIAG <- j; OutMati <- OutMatInit
 		Vcurrent <- V2012
 	for(t in (62*12+1):(92*12)) { Out <- timestep(Vcurrent,t,ArtNdCov11,DIAG,OutMat1);Vcurrent <- Out$Vnext; OutMati[t,] <- Out$Vout  }
-	assign(paste("x",j-1,sep=""),OutMati)	} 
+	assign(paste("x",j-1,sep=""),OutMati)	}
 
 ### Calculate some results
 	Drt <- rep(1,30*12); for(i in 1:length(Drt)) { Drt[i] <- (1+0.03)^(-(i-1)/12) }
