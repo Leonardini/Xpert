@@ -413,10 +413,29 @@
 	Vout["ArtCov"]	  <- sum(Vnext[HAARTInds])/sum(Vnext[73:504])
 	Vout["ArtNdCov"]	<- sum(Vnext[c(289:360,433:504)])/sum(Vnext[217:504])
 	Vout["Art200Cov"]	<- sum(Vnext[433:504])/sum(Vnext[361:504])
+	
+	### Added by Leonid Chindelevitch on October 23, 2012
+#	NumN0 = sum(Vnext[1:72 + 0 * 72])
+#	NumH1 = sum(Vnext[1:72 + 1 * 72])
+#	NumT1 = sum(Vnext[1:72 + 2 * 72])
+#	NumH2 = sum(Vnext[1:72 + 3 * 72])
+#	NumT2 = sum(Vnext[1:72 + 4 * 72])
+#	NumH3 = sum(Vnext[1:72 + 5 * 72])
+#	NumT3 = sum(Vnext[1:72 + 6 * 72])
+#	Nums = c(NumN0, NumH1, NumT1, NumH2, NumT2, NumH3, NumT3)
+  # Computing the distribution between HIV compartments
+  Nums = sapply(split(Alive, rep(0:6, each = 72)), sum)
+  # Normalization
+  Nums = Nums/sum(Nums)
+  # Naming the compartments
+  names(Nums) = c("NumN0", "NumH1", "NumT1", "NumH2", "NumT2", "NumH3", "NumT3")
+	# Random values for now, find right ones!
+	relInfect = c(0, 1, 0.05, 7, 0.05, 7, 0.05)
+	X = rHIVt[t] / sum(relInfect * Nums)
 
 #%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#% 
 #%#%
-	return(list(Vnext=Vnext,Vout=Vout))
+	return(list(Vnext=Vnext,Vout=Vout, X=X))
 	} 	# End of function!
 #%#%
 #%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%#%
